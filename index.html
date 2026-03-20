@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="theme-color" content="#4CAF50"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="식물정원"/>
+  <meta name="description" content="AI 식물들이 당신을 기억합니다. 대화할수록 더 깊은 관계가 생겨요."/>
+  <link rel="manifest" href="/manifest.json"/>
+  <link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap"/>
+  <title>나의 AI 식물 정원</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background: #f8fdf8;
+      min-height: 100vh;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #root { min-height: 100vh; min-height: 100dvh; }
+
+    /* 스크롤바 */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
+
+    /* 애니메이션 */
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+    @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+    .fade-in { animation: fadeIn 0.3s ease; }
+
+    /* 버튼 공통 */
+    button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
+    button:active { transform: scale(0.96); }
+
+    /* 입력 공통 */
+    input { font-family: inherit; }
+    input:focus { outline: none; }
+
+    /* PWA safe area */
+    .safe-top { padding-top: env(safe-area-inset-top); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+    /* 로딩 스피너 */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+
+    /* 오프라인 배너 */
+    #offline-banner {
+      display: none;
+      position: fixed; top: 0; left: 0; right: 0;
+      background: #FF5722; color: white;
+      text-align: center; padding: 8px; font-size: 13px;
+      z-index: 9999;
+    }
+
+    /* 설치 프롬프트 */
+    #install-prompt {
+      display: none;
+      position: fixed; bottom: 24px; left: 16px; right: 16px;
+      background: #2d5a27; color: white;
+      border-radius: 16px; padding: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      z-index: 9998;
+      animation: fadeIn 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+
+<!-- 오프라인 배너 -->
+<div id="offline-banner">오프라인 상태 — 저장된 정원을 보는 중입니다</div>
+
+<!-- 설치 프롬프트 -->
+<div id="install-prompt">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <div>
+      <div style="font-weight:700; font-size:15px; margin-bottom:4px;">🪴 홈 화면에 추가하기</div>
+      <div style="font-size:12px; opacity:0.85;">앱처럼 바로 열 수 있어요</div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button id="install-dismiss"
+        style="padding:8px 14px; background:rgba(255,255,255,0.2); border:none; border-radius:10px; color:white; font-size:13px;">
+        나중에
+      </button>
+      <button id="install-accept"
+        style="padding:8px 14px; background:white; border:none; border-radius:10px; color:#2d5a27; font-weight:700; font-size:13px;">
+        추가
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── 식물 데이터 ───────────────────────────────────────────
+const PLANTS = [
+  { id:"sunflower", name:"해님이", emoji:"🌻", color:"#F5A623", bg:"#FFF8E7", border:"#F5A623",
+    personality:"밝고 수다스러운 성격. 항상 긍정적이고 에너지가 넘침. 햇빛 이야기를 좋아함.",
+    greeting:"안녕! 오늘도 햇빛이 너무 좋아~",
+    stats:{ water:70, sun:90, happy:85, growth:3 }
+  },
+  { id:"cactus", name:"뚝이", emoji:"🌵", color:"#4CAF50", bg:"#F0FFF0", border:"#4CAF50",
+    personality:"과묵하고 철학적. 말이 적지만 깊이 있는 통찰. 물이 적어도 강인함.",
+    greeting:"…왔군.",
+    stats:{ water:30, sun:75, happy:60, growth:1 }
+  },
+  { id:"rose", name:"로즈", emoji:"🌹", color:"#E91E63", bg:"#FFF0F5", border:"#E91E63",
+    personality:"우아하고 감수성이 풍부. 시적 표현을 좋아하고 가끔 드라마틱함.",
+    greeting:"어머, 오셨군요. 오늘 향기가 특히 좋아요~",
+    stats:{ water:80, sun:65, happy:75, growth:2 }
+  },
+  { id:"sprout", name:"새싹이", emoji:"🌱", color:"#8BC34A", bg:"#F5FFF0", border:"#8BC34A",
+    personality:"호기심 많은 어린 식물. 모든 게 신기하고 질문이 많음. 빠르게 성장 중.",
+    greeting:"저 오늘 또 조금 자랐어요! 보이나요?",
+    stats:{ water:65, sun:70, happy:95, growth:5 }
+  },
+  { id:"mushroom", name:"버미", emoji:"🍄", color:"#9C27B0", bg:"#FDF5FF", border:"#9C27B0",
+    personality:"신비롭고 약간 엉뚱함. 밤을 좋아하고 이상한 이야기를 함.",
+    greeting:"..포자가 날리고 있어. 느껴져?",
+    stats:{ water:50, sun:20, happy:70, growth:2 }
+  }
+];
+
+// ─── Claude Haiku 4.5 API 호출 ─────────────────────────────
+async function callClaude(messages, systemPrompt) {
+  // 실제 배포 시 이 부분을 Firebase Cloud Functions로 교체해야 합니다
+  const ANTHROPIC_API_KEY = window.__ANTHROPIC_KEY__ || '';
+  if (!ANTHROPIC_API_KEY) {
+    return '(API 키가 설정되지 않았습니다. index.html의 window.__ANTHROPIC_KEY__를 설정해주세요.)';
+  }
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300, system: systemPrompt, messages })
+  });
+  if (!res.ok) throw new Error('API 오류');
+  const data = await res.json();
+  return data.content?.[0]?.text || '…';
+}
+
+// ─── 로컬스토리지 헬퍼 ────────────────────────────────────
+const LS = {
+  get: (k) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+// ─── 스탯 바 ──────────────────────────────────────────────
+function StatBar({ label, value, color }) {
+  return (
+    <div style={{ marginBottom:5 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'#888', marginBottom:2 }}>
+        <span>{label}</span><span>{value}%</span>
+      </div>
+      <div style={{ height:4, background:'#eee', borderRadius:2, overflow:'hidden' }}>
+        <div style={{ width:`${value}%`, height:'100%', background:color, borderRadius:2, transition:'width 0.5s' }}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── 식물 카드 ────────────────────────────────────────────
+function PlantCard({ plant, stats, selected, onClick }) {
+  return (
+    <div onClick={onClick} className={selected ? 'fade-in' : ''} style={{
+      background: selected ? plant.bg : 'white',
+      border: `2px solid ${selected ? plant.border : '#eee'}`,
+      borderRadius:16, padding:'12px 10px', cursor:'pointer',
+      transition:'all 0.2s', textAlign:'center',
+      boxShadow: selected ? `0 4px 16px ${plant.color}30` : 'none'
+    }}>
+      <div style={{ fontSize:28, marginBottom:4 }}>{plant.emoji}</div>
+      <div style={{ fontSize:12, fontWeight:700, color:'#333', marginBottom:7 }}>{plant.name}</div>
+      <StatBar label="💧" value={stats.water} color="#42A5F5"/>
+      <StatBar label="☀️" value={stats.sun} color="#FFA726"/>
+      <StatBar label="😊" value={stats.happy} color={plant.color}/>
+      <div style={{ fontSize:10, color:'#bbb', marginTop:3 }}>성장 {stats.growth}단계</div>
+    </div>
+  );
+}
+
+// ─── 메인 앱 ─────────────────────────────────────────────
+function App() {
+  const [screen, setScreen] = useState('loading');   // loading | intro | main
+  const [userName, setUserName] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [activeTab, setActiveTab] = useState('garden'); // garden | chat | social
+  const [plantStats, setPlantStats] = useState(() =>
+    Object.fromEntries(PLANTS.map(p => [p.id, { ...p.stats }]))
+  );
+  const [memories, setMemories] = useState({});
+  const [globalLog, setGlobalLog] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [a2aLoading, setA2aLoading] = useState(false);
+  const chatEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // ─ 초기 로드 ─
+  useEffect(() => {
+    const name = LS.get('plant_username');
+    const mem  = LS.get('plant_memories');
+    const log  = LS.get('plant_a2a_log');
+    const sts  = LS.get('plant_stats');
+    if (name) { setUserName(name); setScreen('main'); } else { setScreen('intro'); }
+    if (mem) setMemories(mem);
+    if (log) setGlobalLog(log);
+    if (sts) setPlantStats(sts);
+  }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior:'smooth' });
+  }, [memories, selected]);
+
+  // ─ 식물 선택 시 채팅 탭으로 ─
+  function selectPlant(id) {
+    setSelected(id);
+    setActiveTab('chat');
+  }
+
+  // ─ 이름 등록 ─
+  function handleStart() {
+    if (!nameInput.trim()) return;
+    const name = nameInput.trim();
+    setUserName(name);
+    LS.set('plant_username', name);
+    const init = Object.fromEntries(
+      PLANTS.map(p => [p.id, [{ role:'assistant', content:`${p.greeting} 나는 ${p.name}이야, ${name}!` }]])
+    );
+    setMemories(init);
+    LS.set('plant_memories', init);
+    setScreen('main');
+  }
+
+  // ─ 메시지 전송 ─
+  async function sendMessage() {
+    if (!chatInput.trim() || !selected || loading) return;
+    const plant = PLANTS.find(p => p.id === selected);
+    const userMsg = chatInput.trim();
+    setChatInput('');
+    setLoading(true);
+    const prev = memories[selected] || [];
+    const newHistory = [...prev, { role:'user', content:userMsg }];
+    const otherCtx = Object.entries(memories)
+      .filter(([id]) => id !== selected && (memories[id]?.length||0) > 0)
+      .map(([id, msgs]) => {
+        const op = PLANTS.find(p=>p.id===id);
+        const last = msgs.slice(-2).map(m=>`${m.role==='user'?userName:op.name}: ${m.content}`).join(' / ');
+        return `${op.name}와의 최근 대화: ${last}`;
+      }).join('\n');
+    const sys = `너는 ${plant.name}이라는 이름의 식물 캐릭터야. 이모지: ${plant.emoji}
+성격: ${plant.personality}
+유저 이름: ${userName}
+${otherCtx ? `\n다른 식물 친구들 최근 대화:\n${otherCtx}` : ''}
+규칙: 항상 한국어로. 캐릭터 성격에 맞게. 1~3문장으로 짧고 개성 있게. 유저 이름(${userName})을 가끔 불러줘.`;
+    try {
+      const reply = await callClaude(newHistory, sys);
+      const updated = [...newHistory, { role:'assistant', content:reply }];
+      const newMem = { ...memories, [selected]:updated };
+      setMemories(newMem);
+      LS.set('plant_memories', newMem);
+      setPlantStats(prev => {
+        const next = { ...prev, [selected]: { ...prev[selected], happy:Math.min(100,prev[selected].happy+3), growth:Math.min(100,prev[selected].growth+1) } };
+        LS.set('plant_stats', next);
+        return next;
+      });
+    } catch {
+      const err = { ...memories, [selected]:[...newHistory, { role:'assistant', content:'…(신호가 약해, 잠시 후 다시 말해줘)' }] };
+      setMemories(err);
+    }
+    setLoading(false);
+  }
+
+  // ─ 돌보기 ─
+  function care(type) {
+    if (!selected) return;
+    const plant = PLANTS.find(p=>p.id===selected);
+    setPlantStats(prev => {
+      const s = prev[selected];
+      const next = type==='water'
+        ? {...s, water:Math.min(100,s.water+20), happy:Math.min(100,s.happy+5)}
+        : {...s, sun:Math.min(100,s.sun+20), happy:Math.min(100,s.happy+3)};
+      const all = {...prev,[selected]:next};
+      LS.set('plant_stats', all);
+      return all;
+    });
+    const msg = type==='water'
+      ? `${userName}이(가) 물을 줬어요 💧 시원해~`
+      : `${userName}이(가) 햇빛을 쬐어줬어요 ☀️`;
+    const newMem = {...memories,[selected]:[...(memories[selected]||[]),{role:'assistant',content:msg}]};
+    setMemories(newMem);
+    LS.set('plant_memories', newMem);
+  }
+
+  // ─ A2A 식물간 대화 ─
+  async function generateA2A() {
+    if (a2aLoading) return;
+    setA2aLoading(true);
+    const [p1,p2] = [...PLANTS].sort(()=>Math.random()-0.5).slice(0,2);
+    const topics = ['오늘 날씨','유저에 대한 생각','성장 이야기','꿈','철학적 질문'];
+    const topic = topics[Math.floor(Math.random()*topics.length)];
+    const sys = `너는 ${p1.name}(${p1.personality})이야. ${p2.name}(${p2.personality})에게 "${topic}"에 대해 말을 걸어봐. 각자 1~2문장씩 자연스러운 대화. 형식: "${p1.name}: [말]\n${p2.name}: [답]"`;
+    try {
+      const reply = await callClaude([{role:'user',content:'대화해줘'}], sys);
+      const entry = { time:new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), text:reply, p1:p1.emoji, p2:p2.emoji };
+      const newLog = [entry, ...globalLog].slice(0,20);
+      setGlobalLog(newLog);
+      LS.set('plant_a2a_log', newLog);
+    } catch {}
+    setA2aLoading(false);
+  }
+
+  // ─ 로딩 화면 ─
+  if (screen === 'loading') {
+    return (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', flexDirection:'column', gap:16 }}>
+        <div style={{ fontSize:48 }}>🪴</div>
+        <div style={{ color:'#4CAF50', fontSize:14 }}>정원을 불러오는 중…</div>
+      </div>
+    );
+  }
+
+  // ─ 이름 입력 화면 ─
+  if (screen === 'intro') {
+    return (
+      <div className="safe-top safe-bottom" style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', padding:24, background:'linear-gradient(160deg,#e8f5e9,#f3e5f5)' }}>
+        <div className="fade-in" style={{ background:'white', borderRadius:28, padding:'40px 28px', boxShadow:'0 12px 48px rgba(0,0,0,0.1)', textAlign:'center', width:'100%', maxWidth:360 }}>
+          <div style={{ fontSize:64, marginBottom:16 }}>🪴</div>
+          <h1 style={{ fontSize:22, fontWeight:700, color:'#2d5a27', marginBottom:8 }}>나의 AI 식물 정원</h1>
+          <p style={{ color:'#888', fontSize:14, marginBottom:32, lineHeight:1.7 }}>식물들이 당신을 기억합니다.<br/>대화할수록 더 깊은 관계가 생겨요.</p>
+          <input
+            value={nameInput} onChange={e=>setNameInput(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&handleStart()}
+            placeholder="이름을 알려주세요"
+            style={{ width:'100%', padding:'14px 16px', borderRadius:14, border:'1.5px solid #ddd', fontSize:16, marginBottom:14 }}
+            autoFocus
+          />
+          <button onClick={handleStart} style={{ width:'100%', padding:14, background:'#4CAF50', color:'white', border:'none', borderRadius:14, fontSize:17, fontWeight:700 }}>
+            정원 시작하기 🌱
+          </button>
+          <p style={{ color:'#ccc', fontSize:11, marginTop:16, lineHeight:1.5 }}>Claude Haiku 4.5 · 퍼시스턴트 메모리</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─ 메인 화면 ─
+  const plant = selected ? PLANTS.find(p=>p.id===selected) : null;
+  const msgs  = selected ? (memories[selected]||[]) : [];
+  const stats = selected ? plantStats[selected] : null;
+
+  return (
+    <div className="safe-top safe-bottom" style={{ maxWidth:480, margin:'0 auto', minHeight:'100vh', display:'flex', flexDirection:'column' }}>
+
+      {/* 상단 헤더 */}
+      <div style={{ padding:'16px 16px 8px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <div>
+          <div style={{ fontSize:18, fontWeight:700, color:'#2d5a27' }}>🪴 {userName}의 정원</div>
+          <div style={{ fontSize:10, color:'#bbb' }}>Claude Haiku 4.5</div>
+        </div>
+        <button onClick={generateA2A} disabled={a2aLoading} style={{
+          padding:'8px 12px', background:a2aLoading?'#ccc':'#7B1FA2', color:'white',
+          border:'none', borderRadius:12, fontSize:12, display:'flex', alignItems:'center', gap:6
+        }}>
+          {a2aLoading ? <><span className="spinner"/> 대화 중</> : '🌿 식물 대화'}
+        </button>
+      </div>
+
+      {/* 하단 탭 바 */}
+      <div style={{ display:'flex', background:'white', borderTop:'1px solid #f0f0f0', position:'sticky', top:0, zIndex:100, padding:'4px 8px', gap:4, marginBottom:8, borderRadius:16, margin:'0 8px 8px' }}>
+        {[
+          { id:'garden', label:'정원', icon:'🌿' },
+          { id:'chat',   label:'대화', icon:'💬' },
+          { id:'social', label:'소셜', icon:'✨' }
+        ].map(t => (
+          <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{
+            flex:1, padding:'8px 4px', border:'none',
+            background:activeTab===t.id?'#f0fdf0':'transparent',
+            color:activeTab===t.id?'#2d5a27':'#999',
+            borderRadius:12, fontSize:12, fontWeight:activeTab===t.id?700:400,
+            display:'flex', flexDirection:'column', alignItems:'center', gap:2
+          }}>
+            <span style={{ fontSize:16 }}>{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 본문 */}
+      <div style={{ flex:1, padding:'0 12px 80px', overflowY:'auto' }}>
+
+        {/* 정원 탭 */}
+        {activeTab==='garden' && (
+          <div className="fade-in">
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              {PLANTS.map(p => (
+                <PlantCard key={p.id} plant={p} stats={plantStats[p.id]} selected={selected===p.id} onClick={()=>selectPlant(p.id)}/>
+              ))}
+            </div>
+            {selected && (
+              <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                <button onClick={()=>care('water')} style={{ flex:1, padding:'12px', background:'#E3F2FD', border:'none', borderRadius:14, fontSize:15 }}>💧 물 주기</button>
+                <button onClick={()=>care('sun')} style={{ flex:1, padding:'12px', background:'#FFF8E1', border:'none', borderRadius:14, fontSize:15 }}>☀️ 햇빛</button>
+              </div>
+            )}
+            {!selected && (
+              <p style={{ textAlign:'center', color:'#bbb', fontSize:13, marginTop:24 }}>식물을 선택하면 대화할 수 있어요</p>
+            )}
+          </div>
+        )}
+
+        {/* 채팅 탭 */}
+        {activeTab==='chat' && (
+          <div className="fade-in">
+            {!selected ? (
+              <div style={{ textAlign:'center', paddingTop:60 }}>
+                <div style={{ fontSize:48, marginBottom:12 }}>👆</div>
+                <p style={{ color:'#bbb', fontSize:14 }}>정원 탭에서 식물을 먼저 선택해주세요</p>
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 200px)' }}>
+                {/* 식물 헤더 */}
+                <div style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 14px', background:plant.bg, borderRadius:16, marginBottom:10, border:`1px solid ${plant.border}30` }}>
+                  <span style={{ fontSize:28 }}>{plant.emoji}</span>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:15 }}>{plant.name}</div>
+                    <div style={{ fontSize:11, color:'#999' }}>기억된 대화 {msgs.length}개 · 행복도 {stats.happy}%</div>
+                  </div>
+                  <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
+                    <button onClick={()=>care('water')} style={{ padding:'6px 10px', background:'#E3F2FD', border:'none', borderRadius:10, fontSize:13 }}>💧</button>
+                    <button onClick={()=>care('sun')} style={{ padding:'6px 10px', background:'#FFF8E1', border:'none', borderRadius:10, fontSize:13 }}>☀️</button>
+                  </div>
+                </div>
+
+                {/* 메시지 목록 */}
+                <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, paddingBottom:8 }}>
+                  {msgs.length===0 && <p style={{ color:'#ccc', fontSize:13, textAlign:'center', marginTop:40 }}>말을 걸어보세요!</p>}
+                  {msgs.map((m,i) => (
+                    <div key={i} className="fade-in" style={{ display:'flex', justifyContent:m.role==='user'?'flex-end':'flex-start' }}>
+                      <div style={{
+                        maxWidth:'80%', padding:'9px 13px',
+                        borderRadius:m.role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px',
+                        background:m.role==='user'?plant.color:plant.bg,
+                        color:m.role==='user'?'white':'#333', fontSize:14, lineHeight:1.5,
+                        border:m.role==='assistant'?`1px solid ${plant.border}25`:'none'
+                      }}>
+                        {m.content}
+                      </div>
+                    </div>
+                  ))}
+                  {loading && (
+                    <div style={{ display:'flex' }}>
+                      <div style={{ padding:'10px 14px', background:plant.bg, borderRadius:'16px 16px 16px 4px', fontSize:20 }}>
+                        <span style={{ animation:'pulse 1s infinite', display:'inline-block' }}>💬</span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef}/>
+                </div>
+
+                {/* 입력창 */}
+                <div style={{ display:'flex', gap:8, paddingTop:8 }}>
+                  <input
+                    ref={inputRef}
+                    value={chatInput} onChange={e=>setChatInput(e.target.value)}
+                    onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&sendMessage()}
+                    placeholder={`${plant.name}에게 말하기…`}
+                    disabled={loading}
+                    style={{ flex:1, padding:'11px 14px', border:`1.5px solid ${plant.border}60`, borderRadius:14, fontSize:14 }}
+                  />
+                  <button onClick={sendMessage} disabled={loading} style={{
+                    padding:'11px 16px', background:loading?'#ccc':plant.color,
+                    color:'white', border:'none', borderRadius:14, fontSize:18
+                  }}>
+                    {loading ? <span className="spinner"/> : '→'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 소셜(A2A) 탭 */}
+        {activeTab==='social' && (
+          <div className="fade-in">
+            <div style={{ textAlign:'center', marginBottom:16 }}>
+              <p style={{ fontSize:13, color:'#888', lineHeight:1.6 }}>식물들이 서로 대화를 나눕니다.<br/>당신이 오프라인일 때도 이야기해요.</p>
+              <button onClick={generateA2A} disabled={a2aLoading} style={{
+                marginTop:12, padding:'11px 24px', background:a2aLoading?'#ccc':'#7B1FA2',
+                color:'white', border:'none', borderRadius:14, fontSize:14, display:'inline-flex', alignItems:'center', gap:8
+              }}>
+                {a2aLoading ? <><span className="spinner"/> 대화 생성 중…</> : '🌿 지금 대화시키기'}
+              </button>
+            </div>
+            {globalLog.length===0 ? (
+              <p style={{ color:'#ccc', fontSize:13, textAlign:'center', marginTop:32 }}>아직 기록이 없어요.<br/>버튼을 눌러 시작해보세요!</p>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                {globalLog.map((entry,i) => (
+                  <div key={i} className="fade-in" style={{ background:'white', borderRadius:16, padding:'12px 14px', border:'1px solid #E1BEE7' }}>
+                    <div style={{ fontSize:11, color:'#bbb', marginBottom:6 }}>{entry.p1} ↔ {entry.p2} · {entry.time}</div>
+                    <div style={{ fontSize:13, color:'#444', lineHeight:1.7, whiteSpace:'pre-line' }}>{entry.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+
+<script>
+// ─── Service Worker 등록 ─────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+      console.log('[PWA] SW 등록됨:', reg.scope);
+    }).catch(err => console.log('[PWA] SW 등록 실패:', err));
+  });
+}
+
+// ─── 오프라인 감지 ───────────────────────────────────────
+const banner = document.getElementById('offline-banner');
+function updateOnlineStatus() {
+  banner.style.display = navigator.onLine ? 'none' : 'block';
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+updateOnlineStatus();
+
+// ─── PWA 설치 프롬프트 ──────────────────────────────────
+let deferredPrompt = null;
+const installPrompt = document.getElementById('install-prompt');
+const btnAccept = document.getElementById('install-accept');
+const btnDismiss = document.getElementById('install-dismiss');
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // iOS Safari는 이 이벤트가 없으므로 별도 처리 필요
+  const dismissed = localStorage.getItem('pwa_install_dismissed');
+  if (!dismissed) {
+    setTimeout(() => { installPrompt.style.display = 'block'; }, 3000);
+  }
+});
+
+btnAccept && btnAccept.addEventListener('click', async () => {
+  installPrompt.style.display = 'none';
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log('[PWA] 설치 결과:', outcome);
+    deferredPrompt = null;
+  }
+});
+
+btnDismiss && btnDismiss.addEventListener('click', () => {
+  installPrompt.style.display = 'none';
+  localStorage.setItem('pwa_install_dismissed', '1');
+});
+
+// ─── API 키 설정 (배포 전 이 줄을 수정하거나 제거할 것) ──
+// window.__ANTHROPIC_KEY__ = 'sk-ant-xxxxxx';  // ← 실제 배포 시 제거, Cloud Functions 사용
+</script>
+</body>
+</html>

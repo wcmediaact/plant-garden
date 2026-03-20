@@ -1,0 +1,35 @@
+{
+  "name": "나의 AI 식물 정원",
+  "short_name": "식물정원",
+  "description": "AI 식물들이 당신을 기억합니다. 대화할수록 더 깊은 관계가 생겨요.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fdf8",
+  "theme_color": "#4CAF50",
+  "lang": "ko",
+  "categories": ["games", "health", "lifestyle"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "정원 열기",
+      "short_name": "정원",
+      "description": "나의 식물 정원 바로가기",
+      "url": "/"
+    }
+  ]
+}
